@@ -136,7 +136,7 @@ def process_dataset(dataset_root, dataset_size_map):
         labels_test, \
         dataset_names, \
         sorted(freq_counter.processes), \
-        sorted(freq_counter.evt_opt_tuples)
+        sorted(freq_counter.evt_feature_tuples)
 
 if __name__=="__main__":
     # Prompt usage
