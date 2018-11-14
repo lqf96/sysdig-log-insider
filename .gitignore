@@ -1,0 +1,17 @@
+# macOS files
+.DS_Store
+__MACOSX
+._*
+
+# Python files
+*.pyc
+__pycache__
+# Python package information
+*.egg-info
+# Virtual environment
+venv
+
+# Dataset
+dataset
+# Processing output
+*.npy
