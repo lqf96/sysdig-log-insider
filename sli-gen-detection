@@ -1,0 +1,61 @@
+#! /usr/bin/env python
+from __future__ import unicode_literals, division, print_function
+import sys, json, logging
+from argparse import ArgumentParser
+import numpy as np
+
+from sli.pipeline import gen_detection_dataset
+
+def main():
+    # CLI arguments
+    parser = ArgumentParser(description="SLI detection dataset generation tool")
+    parser.add_argument(
+        "-d", "--dataset-path",
+        required=True,
+        help="Training dataset file path"
+    )
+    parser.add_argument(
+        "-l", "--log-path",
+        required=True,
+        help="Log file or directory path"
+    )
+    parser.add_argument(
+        "-n", "--n-logs",
+        default=0,
+        type=int,
+        help="Number of logs to process (Log directory only)"
+    )
+    parser.add_argument(
+        "-o", "--output",
+        default="-",
+        help="Output detection dataset file path"
+    )
+    # Parse arguments
+    cli_args = parser.parse_args()
+    # Logging configuration
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y/%m/%d %I:%M:%S"
+    )
+    # Load training dataset
+    training_dataset = np.load(cli_args.dataset_path)
+    processes = training_dataset[7]
+    evt_feature_tuples = training_dataset[8]
+    log_features = training_dataset[9]
+    # Process logs
+    process_result = gen_detection_dataset(
+        cli_args.log_path,
+        processes,
+        evt_feature_tuples,
+        cli_args.n_logs,
+        log_features
+    )
+    # Output file
+    output_file = sys.stdout if cli_args.output=="-" else open(cli_args.output, "wb")
+    np.save(output_file, process_result)
+    output_file.close()
+    return 0
+
+if __name__=="__main__":
+    exit(main())

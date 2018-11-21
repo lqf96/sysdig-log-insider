@@ -1,10 +1,13 @@
-from __future__ import unicode_literals, division, print_function
-import os, re, functools
+from __future__ import unicode_literals, division
+import os, re, functools, logging
 from six import iteritems
 from six.moves import map
 import numpy as np
 
 from .types import FdArg
+
+# Logger
+_logger = logging.getLogger(__name__)
 
 def log_pipeline(source, *passes):
     """ Log processing pipeline. """
@@ -28,7 +31,7 @@ def simple_pass(pass_functor):
 @simple_pass
 def inspect_line(data):
     """ Inspect line in the streamline. """
-    print(data)
+    _logger.debug("[Line Inspection] %s", data)
     # Do nothing to data except printing
     return data
 
@@ -98,11 +101,12 @@ def fd_features(path_patterns=[]):
     return feature_generator
 
 class FreqCounter(object):
-    def __init__(self, feature_generators=[]):
-        ## Event-feature tuples set
-        self.evt_feature_tuples = set()
+    def __init__(self, processes=set(), evt_feature_tuples=set(), feature_generators=[]):
+        """ Initialize feature frequency counter. """
         ## Processes set
-        self.processes = set()
+        self.processes = processes
+        ## Event-feature tuples set
+        self.evt_feature_tuples = evt_feature_tuples
         ## Discrete feature generators
         self.feature_generators = feature_generators
     def _process_lines_impl(self, lines, training):

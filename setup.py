@@ -10,7 +10,10 @@ setup(
     author_email="lqf96@uw.edu",
     url="https://github.com/lqf96/sysdig-log-insider",
     packages=["sli"],
-    scripts=["sli-process"],
+    scripts=[
+        "sli-gen-training",
+        "sli-gen-detection"
+    ],
     install_requires=[
         "numpy",
         "scipy",

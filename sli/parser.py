@@ -1,5 +1,6 @@
-from __future__ import unicode_literals, division, print_function
+from __future__ import unicode_literals, division
 import re
+from six import iteritems
 
 from .types import LogLine, OptArg, SyscallErrorArg, FdArg
 from .processing import simple_pass
@@ -116,7 +117,7 @@ def parse_option_args(line, event_opt_args={}):
         return line
     # Process each argument in line
     opt_args_dict = {}
-    for arg_name, arg_raw_val in line.evt_args.items():
+    for arg_name, arg_raw_val in iteritems(line.evt_args):
         # Not optional argument
         if arg_name not in opt_args:
             continue

@@ -1,0 +1,57 @@
+#! /usr/bin/env python
+from __future__ import unicode_literals, division, print_function
+import sys, json, logging
+from argparse import ArgumentParser
+import numpy as np
+
+from sli.pipeline import gen_training_dataset
+
+def main():
+    # CLI arguments
+    parser = ArgumentParser(description="SLI training dataset generation tool")
+    parser.add_argument(
+        "-l", "--log-root",
+        required=True,
+        help="Sysdig log root directory path"
+    )
+    parser.add_argument(
+        "-n", "--log-amount-map",
+        required=True,
+        help="JSON map file containing log amount for each log category"
+    )
+    parser.add_argument(
+        "-o", "--output",
+        default="-",
+        help="Output dataset file path"
+    )
+    parser.add_argument(
+        "-f", "--log-features",
+        default="option-arg,fd",
+        help="Log features to use"
+    )
+    # Parse arguments
+    cli_args = parser.parse_args()
+    # Logging configuration
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y/%m/%d %I:%M:%S"
+    )
+    # Load log amount map
+    with open(cli_args.log_amount_map) as f:
+        log_amount_map = json.load(f)
+    # Log features
+    log_features = cli_args.log_features
+    log_features = [] if log_features=="" else log_features.split(",")
+    # Process dataset and write features
+    process_result = gen_training_dataset(
+        cli_args.log_root, log_amount_map, log_features
+    )
+    # Output file
+    output_file = sys.stdout if cli_args.output=="-" else open(cli_args.output, "wb")
+    np.save(output_file, process_result)
+    output_file.close()
+    return 0
+
+if __name__=="__main__":
+    exit(main())
