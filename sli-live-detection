@@ -1,0 +1,124 @@
+#! /usr/bin/env python
+from __future__ import unicode_literals, division, print_function
+import sys, os, logging, tempfile, random
+from multiprocessing import Process
+from argparse import ArgumentParser
+import numpy as np
+import tensorflow as tf
+
+from sli.processing import gen_detection_dataset
+
+# Logger
+_logger = logging.getLogger(__name__)
+
+# Default exclude processes
+EXCLUDE_PROCESSES = [
+    "sysdig",
+    "Xorg",
+    "compiz",
+    "gdbus",
+    "mandb",
+    "firefox",
+    "gnome-terminal-"
+]
+# Temporary file directory
+TEMP_DIR = tempfile.gettempdir()
+
+def collect_log(root_password, collect_time=10, exclude_processes=EXCLUDE_PROCESSES):
+    """ Collect system call log using Sysdig. """
+    _logger.debug("[collect_log] Begin collecting log for {} seconds".format(collect_time))
+    # Log file path and process filters
+    log_path = os.path.join(TEMP_DIR, "sli-live-{}.txt".format(random.randint(0, sys.maxsize)))
+    proc_filters = " and ".join(("proc.name!="+proc_name for proc_name in exclude_processes))
+    # Log command
+    log_cmd = "sudo -S timeout {}s sysdig {} > {}".format(
+        collect_time, proc_filters, log_path
+    )
+    # Collect log
+    subprocess.run(
+        log_cmd,
+        shell=True,
+        input=root_password+"\n",
+        stdout=subprocess.PIPE,
+        universal_newlines=True
+    )
+    _logger.debug("[collect_log] Log collection completed")
+    # Return log path
+    return log_path
+
+def classify_log(log_path, dataset_path, model_path, threshold=0.85):
+    """ Classify collected log. """
+    # Load dataset
+    dataset = np.load(dataset_path)
+    # Generate detection data
+    detection_data = gen_detection_dataset(
+        log_path, dataset[7], dataset[8], log_features=dataset[9]
+    )
+    # Remove log file
+    os.unlink(log_path)
+    # Import graph
+    tf.reset_default_graph()
+    imported_graph_saver = tf.train.import_meta_graph(model_path+".meta")
+    graph = tf.get_default_graph()
+    # Tensorflow session
+    with tf.Session() as sess:
+        # Restore model
+        imported_graph_saver.restore(sess, model_path)
+        # Input and dense layer of model
+        last_dense_layer = graph.get_tensor_by_name('dense_layer_5/BiasAdd:0')
+        input_layer = graph.get_tensor_by_name('input_X:0')
+        result = sess.run(
+            [tf.nn.softmax(last_dense_layer)],
+            feed_dict={input_layer: detection_data}
+        )
+    # Classification result
+    result = result[0][0]
+    _logger.debug("[classify_log] Log classification completed")
+    if result.max()>threshold:
+        label_name = dataset[6][result.argmax()]
+        _logger.debug("[classify_log] {} attack detected".format(label_name))
+    # Unknown
+    else:
+        _logger.debug("[classify_log] Unknown attack detected")
+
+def main():
+    # CLI arguments
+    parser = ArgumentParser(description="SLI live attack detection demo")
+    parser.add_argument(
+        "-d", "--dataset-path",
+        required=True,
+        help="Training dataset file path"
+    )
+    parser.add_argument(
+        "-p", "--root-password",
+        required=True,
+        help="Root user password"
+    )
+    parser.add_argument(
+        "-m", "--model-path",
+        required=True,
+        help="Log classification Tensorflow model path"
+    )
+    # Parse arguments
+    cli_args = parser.parse_args()
+    # Logging configuration
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y/%m/%d %I:%M:%S"
+    )
+    # Live detection loop
+    while True:
+        # Collect logs for 10 seconds
+        log_path = collect_log(cli_args.root_password)
+        # Start detection
+        p = Process(target=classify_log, args={
+            "log_path": log_path,
+            "dataset_path": cli_args.dataset_path,
+            "model_path": cli_args.model_path
+        })
+        p.start()
+    return 0
+
+if __name__=="__main__":
+    exit(main())

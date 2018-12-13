@@ -48,8 +48,8 @@ def main():
         cli_args.log_path,
         processes,
         evt_feature_tuples,
-        cli_args.n_logs,
-        log_features
+        n_logs=cli_args.n_logs,
+        log_features=log_features
     )
     # Output file
     output_file = sys.stdout if cli_args.output=="-" else open(cli_args.output, "wb")
