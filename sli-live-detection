@@ -1,12 +1,12 @@
 #! /usr/bin/env python
 from __future__ import unicode_literals, division, print_function
-import sys, os, logging, tempfile, random
-from multiprocessing import Process
+import sys, os, logging, tempfile, random, subprocess, json
+from multiprocessing import Pool
 from argparse import ArgumentParser
 import numpy as np
 import tensorflow as tf
 
-from sli.processing import gen_detection_dataset
+from sli.pipeline import gen_detection_dataset
 
 # Logger
 _logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ TEMP_DIR = tempfile.gettempdir()
 
 def collect_log(root_password, collect_time=10, exclude_processes=EXCLUDE_PROCESSES):
     """ Collect system call log using Sysdig. """
-    _logger.debug("[collect_log] Begin collecting log for {} seconds".format(collect_time))
+    _logger.info("[collect_log] Begin collecting log for {} seconds".format(collect_time))
     # Log file path and process filters
     log_path = os.path.join(TEMP_DIR, "sli-live-{}.txt".format(random.randint(0, sys.maxsize)))
     proc_filters = " and ".join(("proc.name!="+proc_name for proc_name in exclude_processes))
@@ -46,40 +46,62 @@ def collect_log(root_password, collect_time=10, exclude_processes=EXCLUDE_PROCES
     # Return log path
     return log_path
 
-def classify_log(log_path, dataset_path, model_path, threshold=0.85):
+# Tensorflow session cache
+_session_cache = {}
+
+def get_tf_session(model_path):
+    """ Load Tensorflow dataset and get a corresponding session. """
+    # Found in session cache
+    session = _session_cache.get(model_path)
+    if session:
+        return session
+    # Restore graph to session
+    session = tf.Session()
+    graph_saver = tf.train.import_meta_graph(model_path+".meta")
+    graph_saver.restore(session, model_path)
+    # Save session to cache
+    _session_cache[model_path] = session
+    return session
+
+def classify_log(log_path, dataset_path, model_path, attack_name_map, threshold=0.8):
     """ Classify collected log. """
     # Load dataset
     dataset = np.load(dataset_path)
     # Generate detection data
+    _logger.debug("[classify_log] Processing log {}".format(log_path))
     detection_data = gen_detection_dataset(
         log_path, dataset[7], dataset[8], log_features=dataset[9]
     )
+    detection_data = detection_data.toarray().astype("float32")
     # Remove log file
     os.unlink(log_path)
-    # Import graph
-    tf.reset_default_graph()
-    imported_graph_saver = tf.train.import_meta_graph(model_path+".meta")
-    graph = tf.get_default_graph()
     # Tensorflow session
-    with tf.Session() as sess:
-        # Restore model
-        imported_graph_saver.restore(sess, model_path)
-        # Input and dense layer of model
-        last_dense_layer = graph.get_tensor_by_name('dense_layer_5/BiasAdd:0')
-        input_layer = graph.get_tensor_by_name('input_X:0')
-        result = sess.run(
-            [tf.nn.softmax(last_dense_layer)],
-            feed_dict={input_layer: detection_data}
-        )
+    session = get_tf_session(model_path)
+    graph = session.graph
+    # Input and dense layer of model
+    last_dense_layer = graph.get_tensor_by_name("dense_layer_5/BiasAdd:0")
+    input_layer = graph.get_tensor_by_name("input_X:0")
+    training = graph.get_tensor_by_name("training:0")
+    # Run classifier
+    _logger.debug("[classify_log] Begin classification")
+    result = session.run(
+        tf.nn.softmax(last_dense_layer),
+        feed_dict={input_layer: detection_data, training: False}
+    )
     # Classification result
-    result = result[0][0]
+    result = result[0]
+    print(attack_name_map)
+    print(result)
     _logger.debug("[classify_log] Log classification completed")
     if result.max()>threshold:
-        label_name = dataset[6][result.argmax()]
-        _logger.debug("[classify_log] {} attack detected".format(label_name))
+        label_name = attack_name_map[result.argmax()]
+        if label_name:
+            _logger.info("[classify_log] {} attack detected".format(label_name))
+        else:
+            _logger.info("[classify_log] No attack is detected")
     # Unknown
     else:
-        _logger.debug("[classify_log] Unknown attack detected")
+        _logger.info("[classify_log] Unknown attack detected")
 
 def main():
     # CLI arguments
@@ -99,6 +121,17 @@ def main():
         required=True,
         help="Log classification Tensorflow model path"
     )
+    parser.add_argument(
+        "-a", "--attack-name-map",
+        required=True,
+        help="JSON file containing index to attack name mapping"
+    )
+    parser.add_argument(
+        "-n", "--num-workers",
+        type=int,
+        default=4,
+        help="Number of workers for classifying logs"
+    )
     # Parse arguments
     cli_args = parser.parse_args()
     # Logging configuration
@@ -107,17 +140,24 @@ def main():
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y/%m/%d %I:%M:%S"
     )
+    logging.getLogger("tensorflow").setLevel(logging.INFO)
+    _logger.setLevel(logging.INFO)
+    # Load attack name map
+    with open(cli_args.attack_name_map) as f:
+        attack_name_map = json.load(f)
+    # Multiprocessing pool
+    pool = Pool(cli_args.num_workers)
     # Live detection loop
     while True:
         # Collect logs for 10 seconds
         log_path = collect_log(cli_args.root_password)
         # Start detection
-        p = Process(target=classify_log, args={
-            "log_path": log_path,
-            "dataset_path": cli_args.dataset_path,
-            "model_path": cli_args.model_path
-        })
-        p.start()
+        pool.apply_async(classify_log, (
+            log_path,
+            cli_args.dataset_path,
+            cli_args.model_path,
+            attack_name_map
+        ))
     return 0
 
 if __name__=="__main__":

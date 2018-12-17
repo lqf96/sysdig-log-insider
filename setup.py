@@ -18,6 +18,7 @@ setup(
         "numpy",
         "scipy",
         "six",
-        "namedlist"
+        "namedlist",
+        "tensorflow"
     ]
 )
